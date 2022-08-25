@@ -758,18 +758,23 @@ class MonoCalibrator(Calibrator):
         """
 
         (ipts, ids, boards) = zip(*good)
-        opts = self.mk_object_points(boards)
         # If FIX_ASPECT_RATIO flag set, enforce focal lengths have 1/1 ratio
         intrinsics_in = numpy.eye(3, dtype=numpy.float64)
 
+        opts = []
         if self.pattern == Patterns.ChArUco:
             if self.camera_model == CAMERA_MODEL.FISHEYE:
                 raise NotImplemented("Can't perform fisheye calibration with ChArUco board")
 
-            reproj_err, self.intrinsics, self.distortion, rvecs, tvecs = cv2.aruco.calibrateCameraCharuco(
-                    ipts, ids, boards[0].charuco_board, self.size, intrinsics_in, None)
+            for ch_ids in ids:
+                opts_loc = numpy.zeros((len(ch_ids), 1, 3), numpy.float32)
+                for (index, id) in enumerate(ch_ids):
+                    opts_loc[index] = boards[0].charuco_board.chessboardCorners[id]
+                opts.append(opts_loc)
+        else:
+            opts = self.mk_object_points(boards)
 
-        elif self.camera_model == CAMERA_MODEL.PINHOLE:
+        if self.camera_model == CAMERA_MODEL.PINHOLE:
             print("mono pinhole calibration...")
             reproj_err, self.intrinsics, dist_coeffs, rvecs, tvecs = cv2.calibrateCamera(
                        opts, ipts,
@@ -1114,18 +1119,36 @@ class StereoCalibrator(Calibrator):
         self.l.cal_fromcorners(lcorners)
         self.r.cal_fromcorners(rcorners)
 
-        (lipts, ripts, _, _, boards) = zip(*good)
-
-        opts = self.mk_object_points(boards, True)
+        lipts = []
+        ripts = []
+        opts = []
+        boards = []
+        if self.pattern == Patterns.ChArUco:
+            # Save image- and object-points visible in both cameras for stereo calibration
+            for lco, rco, lid, rid, b in good:
+                _lipts = []
+                _ripts = []
+                _opts = []
+                for lc, li in zip(lco, lid):
+                    for rc, ri in zip(rco, rid):
+                        if li == ri:
+                            _lipts.append(lc)
+                            _ripts.append(rc)
+                            _opts.append(b.charuco_board.chessboardCorners[li])
+                # Check if at least 6 points visible (DLT algorithm needs at least 6 points for pose estimation)
+                if (len(_lipts) > 5):
+                    lipts.append(numpy.array(_lipts))
+                    ripts.append(numpy.array(_ripts))
+                    opts.append(numpy.array(_opts))
+                    boards.append(b)
+        else:
+            (lipts, ripts, _, _, boards) = zip(*good)
+            opts = self.mk_object_points(boards, True)
 
         flags = cv2.CALIB_FIX_INTRINSIC
 
         self.T = numpy.zeros((3, 1), dtype=numpy.float64)
         self.R = numpy.eye(3, dtype=numpy.float64)
-
-        if self.pattern == Patterns.ChArUco:
-            # TODO: implement stereo ChArUco calibration
-            raise NotImplemented("Stereo calibration not implemented for ChArUco boards")
 
         if self.camera_model == CAMERA_MODEL.PINHOLE:
             print("stereo pinhole calibration...")
@@ -1345,32 +1368,64 @@ class StereoCalibrator(Calibrator):
                 scrib_src = lundistorted.copy()
                 scrib_src[:,:,0] /= x_scale
                 scrib_src[:,:,1] /= y_scale
-                cv2.drawChessboardCorners(lscrib, (lboard.n_cols, lboard.n_rows), scrib_src, True)
+                if lboard.pattern == "charuco":
+                    cv2.aruco.drawDetectedCornersCharuco(lscrib, scrib_src, lids)
+                else:
+                    cv2.drawChessboardCorners(lscrib, (lboard.n_cols, lboard.n_rows), scrib_src, True)
 
             if rcorners is not None:
                 rundistorted = self.r.undistort_points(rcorners)
                 scrib_src = rundistorted.copy()
                 scrib_src[:,:,0] /= x_scale
                 scrib_src[:,:,1] /= y_scale
-                cv2.drawChessboardCorners(rscrib, (rboard.n_cols, rboard.n_rows), scrib_src, True)
+                if rboard.pattern == "charuco":
+                    cv2.aruco.drawDetectedCornersCharuco(rscrib, scrib_src, rids)
+                else:
+                    cv2.drawChessboardCorners(rscrib, (rboard.n_cols, rboard.n_rows), scrib_src, True)
 
             # Report epipolar error
             if lcorners is not None and rcorners is not None and len(lcorners) == len(rcorners):
-                epierror = self.epipolar_error(lundistorted, rundistorted)
+                if lboard.pattern == "charuco":
+                    _lundistorted = []
+                    _rundistorted = []
+                    for lc, li in zip(lundistorted, lids):
+                        for rc, ri in zip(rundistorted, rids):
+                            if li == ri:
+                                _lundistorted.append(lc)
+                                _rundistorted.append(rc)
+                    epierror = self.epipolar_error(numpy.array(_lundistorted), numpy.array(_rundistorted))
+                else:
+                    epierror = self.epipolar_error(lundistorted, rundistorted)
 
         else:
             lscrib = cv2.cvtColor(lscrib_mono, cv2.COLOR_GRAY2BGR)
             rscrib = cv2.cvtColor(rscrib_mono, cv2.COLOR_GRAY2BGR)
             # Draw any detected chessboards onto display (downsampled) images
             if lcorners is not None:
-                cv2.drawChessboardCorners(lscrib, (lboard.n_cols, lboard.n_rows),
+                if lboard.pattern == "charuco":
+                    cv2.aruco.drawDetectedCornersCharuco(lscrib, ldownsampled_corners, lids)
+                else:
+                    cv2.drawChessboardCorners(lscrib, (lboard.n_cols, lboard.n_rows),
                                          ldownsampled_corners, True)
             if rcorners is not None:
-                cv2.drawChessboardCorners(rscrib, (rboard.n_cols, rboard.n_rows),
+                if rboard.pattern == "charuco":
+                    cv2.aruco.drawDetectedCornersCharuco(rscrib, rdownsampled_corners, rids)
+                else:
+                    cv2.drawChessboardCorners(rscrib, (rboard.n_cols, rboard.n_rows),
                                          rdownsampled_corners, True)
 
+            # For ChArUco board add points also if different points in left and right image
+            # min(board_with, board_height) + 1 -> points not in line
+            addPoints = False
+            if lcorners is not None and rcorners is not None:
+                _min_corners = min(rboard.n_cols, rboard.n_rows)
+                if lboard.pattern == "charuco" and len(rcorners) > _min_corners and len(lcorners) > _min_corners:
+                    addPoints = True
+                elif len(lcorners) == len(rcorners):
+                    addPoints = True
+
             # Add sample to database only if it's sufficiently different from any previous sample
-            if lcorners is not None and rcorners is not None and len(lcorners) == len(rcorners):
+            if addPoints:
                 params = self.get_parameters(lcorners, lids, lboard, (lgray.shape[1], lgray.shape[0]))
                 if self.is_good_sample(params, lcorners, lids, self.last_frame_corners, self.last_frame_ids):
                     self.db.append( (params, lgray, rgray) )
