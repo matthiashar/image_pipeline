@@ -9,5 +9,6 @@ For more information on this metapackage and underlying packages, please see [th
 
 For examples, see the [image_pipeline tutorials entry](http://wiki.ros.org/image_pipeline/Tutorials) on the ROS Wiki.
 
-==========
+==============
+
 Added stereo calibration with ChArUco board
