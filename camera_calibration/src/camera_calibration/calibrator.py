@@ -1124,7 +1124,7 @@ class StereoCalibrator(Calibrator):
         opts = []
         boards = []
         if self.pattern == Patterns.ChArUco:
-            # Save image- and object-points visible in both cameras for stereo calibration
+            # Image- and object-points visible in both cameras for stereo calibration
             for lco, rco, lid, rid, b in good:
                 _lipts = []
                 _ripts = []
@@ -1415,14 +1415,14 @@ class StereoCalibrator(Calibrator):
                                          rdownsampled_corners, True)
 
             # For ChArUco board add points also if different points in left and right image
-            # min(board_with, board_height) + 1 -> points not in line
+            # max(board_with, board_height) + 1 -> points not in line
             addPoints = False
             if lcorners is not None and rcorners is not None:
-                _min_corners = min(rboard.n_cols, rboard.n_rows)
-                if lboard.pattern == "charuco" and len(rcorners) > _min_corners and len(lcorners) > _min_corners:
-                    addPoints = True
-                elif len(lcorners) == len(rcorners):
-                    addPoints = True
+                _min_corners = max(rboard.n_cols, rboard.n_rows) # todo: better check if points on line
+                if lboard.pattern == "charuco":
+                    addPoints = len(rcorners) > _min_corners and len(lcorners) > _min_corners
+                else:
+                    addPoints = len(lcorners) == len(rcorners)
 
             # Add sample to database only if it's sufficiently different from any previous sample
             if addPoints:
