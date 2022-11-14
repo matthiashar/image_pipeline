@@ -1384,7 +1384,7 @@ class StereoCalibrator(Calibrator):
                     cv2.drawChessboardCorners(rscrib, (rboard.n_cols, rboard.n_rows), scrib_src, True)
 
             # Report epipolar error
-            if lcorners is not None and rcorners is not None and len(lcorners) == len(rcorners):
+            if lcorners is not None and rcorners is not None:
                 if lboard.pattern == "charuco":
                     _lundistorted = []
                     _rundistorted = []
@@ -1393,8 +1393,9 @@ class StereoCalibrator(Calibrator):
                             if li == ri:
                                 _lundistorted.append(lc)
                                 _rundistorted.append(rc)
-                    epierror = self.epipolar_error(numpy.array(_lundistorted), numpy.array(_rundistorted))
-                else:
+                    if len(_lundistorted) > 0:
+                        epierror = self.epipolar_error(numpy.array(_lundistorted), numpy.array(_rundistorted))
+                elif len(lcorners) == len(rcorners):
                     epierror = self.epipolar_error(lundistorted, rundistorted)
 
         else:
